@@ -284,7 +284,7 @@ class VocabReadingCATTest {
         let lastError;
         for (let i = 0; i < maxRetries; i++) {
             try {
-                const response = await fetch(url);
+                const response = await fetch(url, { cache: 'no-cache' });
                 if (!response.ok) {
                     throw new Error(`Failed to load data: ${response.status}`);
                 }
@@ -304,9 +304,20 @@ class VocabReadingCATTest {
     async loadData() {
         try {
             // GitHub Pages や他の環境でも動作するようにベースパスを取得
-            const basePath = window.location.pathname.endsWith('/') 
-                ? window.location.pathname.slice(0, -1) 
-                : window.location.pathname.replace(/\/[^\/]*$/, '');
+            const path = window.location.pathname;
+            let basePath = path;
+
+            if (!path.endsWith('/')) {
+                basePath = path.replace(/\/[^\/]*$/, '');
+            }
+
+            if (basePath.endsWith('/')) {
+                basePath = basePath.slice(0, -1);
+            }
+
+            if (basePath === '/') {
+                basePath = '';
+            }
             
             // CSVファイルのパスを構築
             const vocabPath = basePath ? `${basePath}/jacet_parameters.csv` : 'jacet_parameters.csv';
@@ -1295,23 +1306,23 @@ class VocabReadingCATTest {
                     (this.readingTimes.expository.question2End - this.readingTimes.expository.textStart) : 0);
 
             const summaryData = {
-                テスト日時: new Date().toLocaleString('ja-JP'),
-                セッションID: this.dataCollector.currentSession.sessionId,
-                受験者名: this.participantInfo.name || '',
-                受験番号: this.participantInfo.identifier || '',
-                英語資格・スコア: this.participantInfo.englishQualifications || '',
-                3ヶ月以上の留学・海外滞在経験: this.participantInfo.studyAbroadExperience || '',
-                幼少期の英語使用状況: this.participantInfo.childhoodEnglishUsage || '',
-                推定θ: Math.round(this.theta * 100) / 100,
-                標準誤差: Math.round(this.se * 100) / 100,
-                推定語彙サイズ: Math.round(this.vocabFromTheta(this.theta)),
-                読解レベル: this.readingLevel,
-                出題数: this.administeredItems.length,
-                正答数: correctCount,
-                正答率: this.responses.length ? Math.round((correctCount / this.responses.length) * 1000) / 10 : 0,
-                平均回答時間ms: averageResponseTime,
-                読解合計時間ms: totalReadingTime,
-                テスト所要時間ms: Date.now() - this.dataCollector.currentSession.startTime.getTime()
+                'テスト日時': new Date().toLocaleString('ja-JP'),
+                'セッションID': this.dataCollector.currentSession.sessionId,
+                '受験者名': this.participantInfo.name || '',
+                '受験番号': this.participantInfo.identifier || '',
+                '英語資格・スコア': this.participantInfo.englishQualifications || '',
+                '3ヶ月以上の留学・海外滞在経験': this.participantInfo.studyAbroadExperience || '',
+                '幼少期の英語使用状況': this.participantInfo.childhoodEnglishUsage || '',
+                '推定θ': Math.round(this.theta * 100) / 100,
+                '標準誤差': Math.round(this.se * 100) / 100,
+                '推定語彙サイズ': Math.round(this.vocabFromTheta(this.theta)),
+                '読解レベル': this.readingLevel,
+                '出題数': this.administeredItems.length,
+                '正答数': correctCount,
+                '正答率': this.responses.length ? Math.round((correctCount / this.responses.length) * 1000) / 10 : 0,
+                '平均回答時間ms': averageResponseTime,
+                '読解合計時間ms': totalReadingTime,
+                'テスト所要時間ms': Date.now() - this.dataCollector.currentSession.startTime.getTime()
             };
 
             const lines = [];
