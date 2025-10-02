@@ -52,7 +52,10 @@ class DataCollector {
             checkpoints: [], // NEW: For partial save points
             participantInfo: {
                 name: '',
-                identifier: ''
+                identifier: '',
+                englishQualifications: '',
+                studyAbroadExperience: '',
+                childhoodEnglishUsage: ''
             }
         };
         this.initializeEventListeners();
@@ -140,15 +143,17 @@ class DataCollector {
         });
     }
 
-    setParticipantInfo(name, identifier) {
-        this.currentSession.participantInfo = {
-            name: name.trim(),
-            identifier: identifier.trim()
+    setParticipantInfo(participantInfo = {}) {
+        const sanitizedInfo = {
+            name: (participantInfo.name || '').trim(),
+            identifier: (participantInfo.identifier || '').trim(),
+            englishQualifications: (participantInfo.englishQualifications || '').trim(),
+            studyAbroadExperience: (participantInfo.studyAbroadExperience || '').trim(),
+            childhoodEnglishUsage: (participantInfo.childhoodEnglishUsage || '').trim()
         };
-        this.logInteraction('participant_registered', {
-            name: this.currentSession.participantInfo.name,
-            identifier: this.currentSession.participantInfo.identifier
-        });
+
+        this.currentSession.participantInfo = sanitizedInfo;
+        this.logInteraction('participant_registered', { ...sanitizedInfo });
     }
 
     // NEW: Save checkpoint for partial data
@@ -264,8 +269,12 @@ class VocabReadingCATTest {
         };
         this.participantInfo = {
             name: '',
-            identifier: ''
+            identifier: '',
+            englishQualifications: '',
+            studyAbroadExperience: '',
+            childhoodEnglishUsage: ''
         };
+        this.preTestStep = 'participant';
         this.stylesInjected = false;
         this.injectStyles();
         this.loadData();
@@ -386,6 +395,14 @@ class VocabReadingCATTest {
         this.theta = this.catConfig.priorMean;
         this.se = this.catConfig.priorSD;
         this.nextItem = this.selectInitialItem();
+        this.participantInfo = {
+            name: '',
+            identifier: '',
+            englishQualifications: '',
+            studyAbroadExperience: '',
+            childhoodEnglishUsage: ''
+        };
+        this.preTestStep = 'participant';
         
         // Reading Phase variables
         this.phase = 'cat'; // 'cat', 'reading_narrative', 'reading_expository', 'final'
@@ -1210,6 +1227,9 @@ class VocabReadingCATTest {
                 session_id: this.dataCollector.currentSession.sessionId,
                 participant_name: this.participantInfo.name || '',
                 participant_identifier: this.participantInfo.identifier || '',
+                participant_english_qualifications: this.participantInfo.englishQualifications || '',
+                participant_study_abroad_experience_3m_plus: this.participantInfo.studyAbroadExperience || '',
+                participant_childhood_english_usage: this.participantInfo.childhoodEnglishUsage || '',
                 theta: Math.round(this.theta * 100) / 100,
                 standard_error: Math.round(this.se * 100) / 100,
                 vocabulary_size: Math.round(this.vocabFromTheta(this.theta)),
@@ -1222,12 +1242,23 @@ class VocabReadingCATTest {
                 total_test_duration_ms: Date.now() - this.dataCollector.currentSession.startTime.getTime()
             }];
 
+            const surveyDetails = [{
+                session_id: this.dataCollector.currentSession.sessionId,
+                participant_name: this.participantInfo.name || '',
+                participant_identifier: this.participantInfo.identifier || '',
+                english_qualifications: this.participantInfo.englishQualifications || '',
+                study_abroad_experience_3m_plus: this.participantInfo.studyAbroadExperience || '',
+                childhood_english_usage: this.participantInfo.childhoodEnglishUsage || ''
+            }];
+
             const wb = XLSX.utils.book_new();
             const wsSummary = XLSX.utils.json_to_sheet(summary);
+            const wsSurvey = XLSX.utils.json_to_sheet(surveyDetails);
             const wsVocab = XLSX.utils.json_to_sheet(vocabResponses);
             const wsReading = XLSX.utils.json_to_sheet(readingResponses);
 
             XLSX.utils.book_append_sheet(wb, wsSummary, "Summary");
+            XLSX.utils.book_append_sheet(wb, wsSurvey, "Participant_Survey");
             XLSX.utils.book_append_sheet(wb, wsVocab, "Vocabulary_Responses");
             XLSX.utils.book_append_sheet(wb, wsReading, "Reading_Responses");
 
@@ -1268,6 +1299,9 @@ class VocabReadingCATTest {
                 セッションID: this.dataCollector.currentSession.sessionId,
                 受験者名: this.participantInfo.name || '',
                 受験番号: this.participantInfo.identifier || '',
+                英語資格・スコア: this.participantInfo.englishQualifications || '',
+                3ヶ月以上の留学・海外滞在経験: this.participantInfo.studyAbroadExperience || '',
+                幼少期の英語使用状況: this.participantInfo.childhoodEnglishUsage || '',
                 推定θ: Math.round(this.theta * 100) / 100,
                 標準誤差: Math.round(this.se * 100) / 100,
                 推定語彙サイズ: Math.round(this.vocabFromTheta(this.theta)),
@@ -1388,107 +1422,227 @@ class VocabReadingCATTest {
         const app = document.getElementById('app');
         const namePrefill = this.escapeHtml(this.participantInfo.name || '');
         const identifierPrefill = this.escapeHtml(this.participantInfo.identifier || '');
+        const qualificationsPrefill = this.escapeHtml(this.participantInfo.englishQualifications || '');
+        const studyAbroadPrefill = this.escapeHtml(this.participantInfo.studyAbroadExperience || '');
+        const childhoodPrefill = this.escapeHtml(this.participantInfo.childhoodEnglishUsage || '');
         const participantLabel = this.formatParticipantLabel();
+        const formatSurveyAnswer = (text) => {
+            if (!text) {
+                return '<span class="text-muted">未回答</span>';
+            }
+            return this.escapeHtml(text).replace(/\n/g, '<br>');
+        };
 
-        if (this.phase === 'cat' && !this.started) {            // Streamlined landing page for test takers
-            app.innerHTML = `
-                <div class="container py-5 fade-in">
-                    <div class="row justify-content-center mb-4">
-                        <div class="col-xl-7 col-lg-8">
-                            <div class="card shadow-sm border-0">
-                                <div class="card-body p-5 text-center">
-                                    <h1 class="mb-3">JACET 語彙・読解テスト</h1>
-                                    <p class="text-muted mb-0">Computer Adaptive Test (CAT) で語彙力と読解力を効率的に測定します。</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+        if (this.phase === 'cat' && !this.started) {
+            const currentPreTestStep = this.preTestStep || 'participant';
 
-                    <div class="row justify-content-center g-4 mb-4">
-                        <div class="col-md-6 col-lg-4">
-                            <div class="info-summary-card h-100">
-                                <h5><i class="fas fa-bolt me-2 text-primary"></i>テスト概要</h5>
-                                <ul class="cat-instruction-list">
-                                    <li>語彙4択問題を順番に回答（約30問）</li>
-                                    <li>回答に応じて難易度が自動調整</li>
-                                    <li>続けてレベル別読解問題を2題実施</li>
-                                </ul>
-                            </div>
-                        </div>
-                        <div class="col-md-6 col-lg-4">
-                            <div class="info-summary-card h-100">
-                                <h5><i class="fas fa-user-check me-2 text-success"></i>受験時のポイント</h5>
-                                <ul class="cat-instruction-list">
-                                    <li>わからなくても必ず回答</li>
-                                    <li>途中で戻る・修正はできません</li>
-                                    <li>静かな環境で集中して取り組みましょう</li>
-                                </ul>
-                            </div>
-                        </div>
-                        <div class="col-md-6 col-lg-4">
-                            <div class="info-summary-card h-100">
-                                <h5><i class="fas fa-laptop me-2 text-info"></i>受験前の準備</h5>
-                                <ul class="cat-instruction-list">
-                                    <li>最新ブラウザ・安定した通信環境</li>
-                                    <li>15〜20分ほどの時間を確保</li>
-                                    <li>結果はダウンロードして保存可能</li>
-                                </ul>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="row justify-content-center">
-                        <div class="col-xl-6 col-lg-7">
-                            <div class="card shadow-lg border-primary start-card text-center">
-                                <div class="card-body p-4">
-                                    <h4 class="mb-3">準備ができたら開始してください</h4>
-                                    <p class="text-muted mb-3">語彙項目 ${this.vocabularyItems.length} 件 / 読解テキスト ${this.readingTexts.length} 種</p>
-                                    <p class="text-danger"><strong>回答後に戻る操作はできません</strong></p>
-                                    <div class="row g-3 mb-3 text-start">
-                                        <div class="col-md-7">
-                                            <label for="participantName" class="form-label">氏名 <span class="text-danger">*</span></label>
-                                            <input type="text" id="participantName" class="form-control form-control-lg" placeholder="例：山田 太郎" value="${namePrefill}" required>
-                                        </div>
-                                        <div class="col-md-5">
-                                            <label for="participantNumber" class="form-label">受験番号</label>
-                                            <input type="text" id="participantNumber" class="form-control form-control-lg" placeholder="例：A1234" value="${identifierPrefill}">
-                                        </div>
+            if (currentPreTestStep === 'survey') {
+                app.innerHTML = `
+                    <div class="container py-5 fade-in">
+                        <div class="row justify-content-center mb-4">
+                            <div class="col-xl-7 col-lg-8">
+                                <div class="card shadow-sm border-0">
+                                    <div class="card-body p-4 text-center text-lg-start">
+                                        <h4 class="mb-2">英語に関するアンケート</h4>
+                                        <p class="text-muted mb-0">テスト前に英語資格や経験について教えてください。</p>
                                     </div>
-                                    <button id="startBtn" class="btn btn-primary btn-lg">
-                                        <i class="fas fa-play me-2"></i>テストを開始
-                                    </button>
-                                    <small class="text-muted d-block mt-3">完了後は Excel / JSON / CSV で結果を保存できます</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row justify-content-center">
+                            <div class="col-xl-6 col-lg-7">
+                                <div class="card shadow-lg border-primary start-card">
+                                    <div class="card-body p-4">
+                                        ${participantLabel ? `<div class="alert alert-light border text-start mb-3"><strong>受験者:</strong> ${participantLabel}</div>` : ''}
+                                        <div class="mb-3">
+                                            <label for="englishQualifications" class="form-label">英語に関する資格・スコア</label>
+                                            <textarea id="englishQualifications" class="form-control form-control-lg" rows="3" placeholder="例：英検準1級、TOEIC 850点、IELTS 6.5など">${qualificationsPrefill}</textarea>
+                                            <small class="text-muted">保有している資格や直近のスコアがあれば記入してください。（空欄でも構いません）</small>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="studyAbroadExperience" class="form-label">3ヶ月以上の留学・海外滞在経験</label>
+                                            <textarea id="studyAbroadExperience" class="form-control form-control-lg" rows="3" placeholder="例：2019年にカナダへ6か月留学">${studyAbroadPrefill}</textarea>
+                                            <small class="text-muted">期間や場所、使用した言語などをご自由に記入してください。（空欄でも構いません）</small>
+                                        </div>
+                                        <div class="mb-4">
+                                            <label for="childhoodEnglishUsage" class="form-label">幼少期の英語使用状況</label>
+                                            <textarea id="childhoodEnglishUsage" class="form-control form-control-lg" rows="3" placeholder="例：幼稚園で英語を週1回学習">${childhoodPrefill}</textarea>
+                                            <small class="text-muted">家庭や学校などで英語を使用していた場合は詳細をご記入ください。（空欄でも構いません）</small>
+                                        </div>
+                                        <div class="d-flex flex-column flex-md-row gap-3 justify-content-between">
+                                            <button id="backToInfoBtn" class="btn btn-outline-secondary btn-lg">
+                                                <i class="fas fa-arrow-left me-2"></i>戻る
+                                            </button>
+                                            <button id="startTestBtn" class="btn btn-primary btn-lg">
+                                                <i class="fas fa-play me-2"></i>テストを開始
+                                            </button>
+                                        </div>
+                                        <small class="text-muted d-block mt-3">結果はExcelファイルとしてダウンロードできます。</small>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            `;
+                `;
 
-            document.getElementById('startBtn').addEventListener('click', () => {
-                const nameInput = document.getElementById('participantName');
-                const identifierInput = document.getElementById('participantNumber');
-                const participantName = nameInput ? nameInput.value.trim() : '';
-                if (!participantName) {
-                    alert('氏名を入力してください。');
-                    if (nameInput) nameInput.focus();
-                    return;
+                const backBtn = document.getElementById('backToInfoBtn');
+                if (backBtn) {
+                    backBtn.addEventListener('click', () => {
+                        const qualificationsInput = document.getElementById('englishQualifications');
+                        const studyAbroadInput = document.getElementById('studyAbroadExperience');
+                        const childhoodInput = document.getElementById('childhoodEnglishUsage');
+
+                        this.participantInfo = {
+                            ...this.participantInfo,
+                            englishQualifications: qualificationsInput ? qualificationsInput.value : this.participantInfo.englishQualifications,
+                            studyAbroadExperience: studyAbroadInput ? studyAbroadInput.value : this.participantInfo.studyAbroadExperience,
+                            childhoodEnglishUsage: childhoodInput ? childhoodInput.value : this.participantInfo.childhoodEnglishUsage
+                        };
+
+                        this.preTestStep = 'participant';
+                        this.dataCollector.logInteraction('participant_survey_back', {
+                            timestamp: Date.now()
+                        });
+                        this.render();
+                    });
                 }
-                const participantIdentifier = identifierInput ? identifierInput.value.trim() : '';
-                this.participantInfo = {
-                    name: participantName,
-                    identifier: participantIdentifier
-                };
-                this.dataCollector.setParticipantInfo(participantName, participantIdentifier);
 
-                this.started = true;
-                this.dataCollector.logInteraction('test_started', {
-                    timestamp: Date.now(),
-                    participantName: participantName,
-                    participantIdentifier: participantIdentifier
-                });
-                this.render();
-            });
+                const startTestBtn = document.getElementById('startTestBtn');
+                if (startTestBtn) {
+                    startTestBtn.addEventListener('click', () => {
+                        const qualificationsInput = document.getElementById('englishQualifications');
+                        const studyAbroadInput = document.getElementById('studyAbroadExperience');
+                        const childhoodInput = document.getElementById('childhoodEnglishUsage');
+
+                        const englishQualifications = qualificationsInput ? qualificationsInput.value.trim() : '';
+                        const studyAbroadExperience = studyAbroadInput ? studyAbroadInput.value.trim() : '';
+                        const childhoodEnglishUsage = childhoodInput ? childhoodInput.value.trim() : '';
+
+                        this.participantInfo = {
+                            ...this.participantInfo,
+                            englishQualifications,
+                            studyAbroadExperience,
+                            childhoodEnglishUsage
+                        };
+
+                        this.dataCollector.logInteraction('participant_survey_submitted', {
+                            englishQualifications,
+                            studyAbroadExperience,
+                            childhoodEnglishUsage
+                        });
+                        this.dataCollector.setParticipantInfo(this.participantInfo);
+
+                        this.started = true;
+                        this.preTestStep = null;
+                        this.dataCollector.logInteraction('test_started', {
+                            timestamp: Date.now(),
+                            participant: { ...this.participantInfo }
+                        });
+                        this.render();
+                    });
+                }
+
+            } else {
+                app.innerHTML = `
+                    <div class="container py-5 fade-in">
+                        <div class="row justify-content-center mb-4">
+                            <div class="col-xl-7 col-lg-8">
+                                <div class="card shadow-sm border-0">
+                                    <div class="card-body p-5 text-center">
+                                        <h1 class="mb-3">JACET 語彙・読解テスト</h1>
+                                        <p class="text-muted mb-0">Computer Adaptive Test (CAT) で語彙力と読解力を効率的に測定します。</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row justify-content-center g-4 mb-4">
+                            <div class="col-md-6 col-lg-4">
+                                <div class="info-summary-card h-100">
+                                    <h5><i class="fas fa-bolt me-2 text-primary"></i>テスト概要</h5>
+                                    <ul class="cat-instruction-list">
+                                        <li>語彙4択問題を順番に回答（約30問）</li>
+                                        <li>回答に応じて難易度が自動調整</li>
+                                        <li>続けてレベル別読解問題を2題実施</li>
+                                    </ul>
+                                </div>
+                            </div>
+                            <div class="col-md-6 col-lg-4">
+                                <div class="info-summary-card h-100">
+                                    <h5><i class="fas fa-user-check me-2 text-success"></i>受験時のポイント</h5>
+                                    <ul class="cat-instruction-list">
+                                        <li>わからなくても必ず回答</li>
+                                        <li>途中で戻る・修正はできません</li>
+                                        <li>静かな環境で集中して取り組みましょう</li>
+                                    </ul>
+                                </div>
+                            </div>
+                            <div class="col-md-6 col-lg-4">
+                                <div class="info-summary-card h-100">
+                                    <h5><i class="fas fa-laptop me-2 text-info"></i>受験前の準備</h5>
+                                    <ul class="cat-instruction-list">
+                                        <li>最新ブラウザ・安定した通信環境</li>
+                                        <li>15〜20分ほどの時間を確保</li>
+                                        <li>結果はExcelファイルで取得できます</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row justify-content-center">
+                            <div class="col-xl-6 col-lg-7">
+                                <div class="card shadow-lg border-primary start-card text-center">
+                                    <div class="card-body p-4">
+                                        <h4 class="mb-3">受験者情報を入力してください</h4>
+                                        <p class="text-muted mb-3">続くステップで英語経験アンケートにご回答いただきます。</p>
+                                        <div class="row g-3 mb-3 text-start">
+                                            <div class="col-md-7">
+                                                <label for="participantName" class="form-label">氏名 <span class="text-danger">*</span></label>
+                                                <input type="text" id="participantName" class="form-control form-control-lg" placeholder="例：山田 太郎" value="${namePrefill}" required>
+                                            </div>
+                                            <div class="col-md-5">
+                                                <label for="participantNumber" class="form-label">受験番号</label>
+                                                <input type="text" id="participantNumber" class="form-control form-control-lg" placeholder="例：A1234" value="${identifierPrefill}">
+                                            </div>
+                                        </div>
+                                        <button id="proceedSurveyBtn" class="btn btn-primary btn-lg">
+                                            <i class="fas fa-arrow-right me-2"></i>アンケートへ進む
+                                        </button>
+                                        <small class="text-muted d-block mt-3">アンケート完了後にテストが開始され、結果はExcelにまとめられます。</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                const proceedBtn = document.getElementById('proceedSurveyBtn');
+                if (proceedBtn) {
+                    proceedBtn.addEventListener('click', () => {
+                        const nameInput = document.getElementById('participantName');
+                        const identifierInput = document.getElementById('participantNumber');
+                        const participantName = nameInput ? nameInput.value.trim() : '';
+                        if (!participantName) {
+                            alert('氏名を入力してください。');
+                            if (nameInput) nameInput.focus();
+                            return;
+                        }
+                        const participantIdentifier = identifierInput ? identifierInput.value.trim() : '';
+                        this.participantInfo = {
+                            ...this.participantInfo,
+                            name: participantName,
+                            identifier: participantIdentifier
+                        };
+                        this.preTestStep = 'survey';
+                        this.dataCollector.logInteraction('participant_info_collected', {
+                            name: participantName,
+                            identifier: participantIdentifier
+                        });
+                        this.render();
+                    });
+                }
+            }
 
         } else if (this.phase === 'cat' && !this.catDone) {
             // Vocabulary test question page
@@ -1552,10 +1706,23 @@ class VocabReadingCATTest {
             // Final results page
             const vocabSize = Math.round(this.vocabFromTheta(this.theta));
             const accuracy = Math.round((this.responses.filter(r => r === 1).length / this.responses.length) * 100 * 10) / 10;
+            const englishQualificationsDisplay = formatSurveyAnswer(this.participantInfo.englishQualifications);
+            const studyAbroadDisplay = formatSurveyAnswer(this.participantInfo.studyAbroadExperience);
+            const childhoodDisplay = formatSurveyAnswer(this.participantInfo.childhoodEnglishUsage);
+            const surveySection = `
+                <div class="mt-4 text-start">
+                    <h5 class="mb-2">アンケート回答</h5>
+                    <div class="bg-light rounded p-3">
+                        <p class="mb-2"><strong>英語資格・スコア</strong><br>${englishQualificationsDisplay}</p>
+                        <p class="mb-2"><strong>3ヶ月以上の留学・海外滞在経験</strong><br>${studyAbroadDisplay}</p>
+                        <p class="mb-0"><strong>幼少期の英語使用状況</strong><br>${childhoodDisplay}</p>
+                    </div>
+                </div>
+            `;
 
             app.innerHTML = `
                 <div class="row pt-4 fade-in">
-                    <div class="col-8 offset-2">
+                    <div class="col-xl-8 col-lg-10 offset-xl-2 offset-lg-1">
                         <div class="card p-4 shadow-sm text-center">
                             <h2 class="mb-4">テスト完了</h2>
                             ${participantLabel ? `<div class="alert alert-light border text-start"><strong>受験者:</strong> ${participantLabel}</div>` : ''}
@@ -1564,22 +1731,18 @@ class VocabReadingCATTest {
                                 <p>読解レベル: ${this.readingLevel}Kレベル</p>
                                 <p>語彙問題正答率: ${accuracy}%</p>
                             </div>
+                            ${surveySection}
                             <div class="mt-4 d-flex flex-wrap justify-content-center gap-3">
                                 <button id="downloadBtn" class="btn btn-success btn-lg">
-                                    <i class="fas fa-file-excel me-2"></i>Excelでダウンロード
-                                </button>
-                                <button id="downloadCsvBtn" class="btn btn-outline-primary btn-lg">
-                                    <i class="fas fa-file-csv me-2"></i>CSVサマリー
-                                </button>
-                                <button id="downloadJsonBtn" class="btn btn-info btn-lg">
-                                    <i class="fas fa-file-code me-2"></i>詳細データ(JSON)
+                                    <i class="fas fa-file-excel me-2"></i>結果をExcelでダウンロード
                                 </button>
                                 <button id="restartBtn" class="btn btn-outline-secondary btn-lg">
                                     <i class="fas fa-redo me-2"></i>再テスト
                                 </button>
                             </div>
-                            <div class="mt-3">
-                                <small class="text-muted">Session ID: ${this.dataCollector.currentSession.sessionId}</small>
+                            <div class="mt-3 text-muted small">
+                                Excelファイルには語彙・読解の詳細データとアンケート回答が含まれます。<br>
+                                Session ID: ${this.dataCollector.currentSession.sessionId}
                             </div>
                         </div>
                     </div>
@@ -1588,17 +1751,6 @@ class VocabReadingCATTest {
 
             document.getElementById('downloadBtn').addEventListener('click', () => {
                 this.exportToExcel();
-            });
-
-            const csvBtn = document.getElementById('downloadCsvBtn');
-            if (csvBtn) {
-                csvBtn.addEventListener('click', () => {
-                    this.exportSummaryCSV();
-                });
-            }
-
-            document.getElementById('downloadJsonBtn').addEventListener('click', () => {
-                this.exportDetailedJSON();
             });
 
             document.getElementById('restartBtn').addEventListener('click', () => {
@@ -1611,7 +1763,8 @@ class VocabReadingCATTest {
             this.dataCollector.logInteraction('test_completed', {
                 finalVocabSize: vocabSize,
                 accuracy: accuracy,
-                totalDuration: Date.now() - this.dataCollector.currentSession.startTime.getTime()
+                totalDuration: Date.now() - this.dataCollector.currentSession.startTime.getTime(),
+                participant: { ...this.participantInfo }
             });
         }
     }
