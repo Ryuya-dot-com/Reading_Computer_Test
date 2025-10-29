@@ -55,7 +55,8 @@ class DataCollector {
                 identifier: '',
                 englishQualifications: '',
                 studyAbroadExperience: '',
-                childhoodEnglishUsage: ''
+                childhoodEnglishUsage: '',
+                inClassImplementation: ''
             }
         };
         this.initializeEventListeners();
@@ -149,7 +150,8 @@ class DataCollector {
             identifier: (participantInfo.identifier || '').trim(),
             englishQualifications: (participantInfo.englishQualifications || '').trim(),
             studyAbroadExperience: (participantInfo.studyAbroadExperience || '').trim(),
-            childhoodEnglishUsage: (participantInfo.childhoodEnglishUsage || '').trim()
+            childhoodEnglishUsage: (participantInfo.childhoodEnglishUsage || '').trim(),
+            inClassImplementation: (participantInfo.inClassImplementation || '').trim()
         };
 
         this.currentSession.participantInfo = sanitizedInfo;
@@ -272,10 +274,58 @@ class VocabReadingCATTest {
             identifier: '',
             englishQualifications: '',
             studyAbroadExperience: '',
-            childhoodEnglishUsage: ''
+            childhoodEnglishUsage: '',
+            inClassImplementation: ''
         };
+        this.scoreReportRubric = [
+            {
+                min: 0,
+                max: 1999,
+                label: '～1999語',
+                eiken: '英検3級相当',
+                cefr: 'CEFR A1',
+                message: '中学卒業程度の語彙力です。日常的な表現の強化がおすすめです。'
+            },
+            {
+                min: 2000,
+                max: 2999,
+                label: '2000語レベル',
+                eiken: '英検準2級相当',
+                cefr: 'CEFR A2',
+                message: '基本的なコミュニケーションが可能な語彙力です。高校初級レベルの総復習に適しています。'
+            },
+            {
+                min: 3000,
+                max: 3999,
+                label: '3000語レベル',
+                eiken: '英検2級相当',
+                cefr: 'CEFR B1',
+                message: '3000語レベルは英検2級・CEFR B1程度で、高校卒業レベルの英文に対応できる語彙力です。'
+            },
+            {
+                min: 4000,
+                max: 4999,
+                label: '4000語レベル',
+                eiken: '英検準1級相当',
+                cefr: 'CEFR B2',
+                message: '大学初年次レベルの英文に対応できます。多読と語彙の拡張を継続しましょう。'
+            },
+            {
+                min: 5000,
+                max: Number.POSITIVE_INFINITY,
+                label: '5000語以上',
+                eiken: '英検1級相当',
+                cefr: 'CEFR C1',
+                message: '高度なアカデミック英文にも対応可能な語彙力です。専門的な語彙の強化に取り組みましょう。'
+            }
+        ];
         this.preTestStep = 'participant';
         this.stylesInjected = false;
+        this.vocabTimerTimeoutId = null;
+        this.vocabTimerIntervalId = null;
+        this.vocabTimerDeadline = null;
+        this.isQuestionActive = false;
+        this.lastQuestionStartTime = null;
         this.injectStyles();
         this.loadData();
     }
@@ -411,9 +461,13 @@ class VocabReadingCATTest {
             identifier: '',
             englishQualifications: '',
             studyAbroadExperience: '',
-            childhoodEnglishUsage: ''
+            childhoodEnglishUsage: '',
+            inClassImplementation: ''
         };
         this.preTestStep = 'participant';
+        this.clearVocabTimer();
+        this.isQuestionActive = false;
+        this.lastQuestionStartTime = null;
         
         // Reading Phase variables
         this.phase = 'cat'; // 'cat', 'reading_narrative', 'reading_expository', 'final'
@@ -487,6 +541,197 @@ class VocabReadingCATTest {
             return `${name}（${this.escapeHtml(this.participantInfo.identifier)}）`;
         }
         return name;
+    }
+
+    getScoreReportForSize(vocabSize) {
+        if (!Array.isArray(this.scoreReportRubric) || !this.scoreReportRubric.length) {
+            return null;
+        }
+        if (!Number.isFinite(vocabSize)) {
+            return this.scoreReportRubric[0];
+        }
+        return this.scoreReportRubric.find(level => vocabSize >= level.min && vocabSize <= level.max) ||
+            this.scoreReportRubric[this.scoreReportRubric.length - 1];
+    }
+
+    getFlashcardPairs() {
+        if (!Array.isArray(this.responseDetails) || !this.responseDetails.length) {
+            return [];
+        }
+        const pairs = [];
+        const seen = new Set();
+        for (const detail of this.responseDetails) {
+            if (seen.has(detail.itemIndex)) continue;
+            seen.add(detail.itemIndex);
+            pairs.push({
+                japanese: detail.item,
+                english: detail.correctAnswer,
+                level: detail.level,
+                wasCorrect: detail.correct === 1
+            });
+        }
+        return pairs;
+    }
+
+    renderFlashcardSection() {
+        const pairs = this.getFlashcardPairs();
+        if (!pairs.length) {
+            return '';
+        }
+
+        const cards = pairs.map(pair => `
+            <div class="flashcard ${pair.wasCorrect ? 'flashcard-correct' : 'flashcard-incorrect'}" data-side="front" role="button" tabindex="0" aria-pressed="false" aria-label="日本語「${this.escapeHtml(pair.japanese)}」のカード">
+                <div class="flashcard-face flashcard-front">
+                    <span class="flashcard-label">日本語</span>
+                    <div class="flashcard-word">${this.escapeHtml(pair.japanese)}</div>
+                    <span class="badge bg-secondary-subtle text-secondary-emphasis">Level ${this.escapeHtml(String(pair.level))}</span>
+                    <div class="flashcard-hint text-muted small mt-2">クリックまたはEnterで英語を表示</div>
+                </div>
+                <div class="flashcard-face flashcard-back">
+                    <span class="flashcard-label">English</span>
+                    <div class="flashcard-word">${this.escapeHtml(pair.english)}</div>
+                    <div class="flashcard-hint text-muted small mt-2">クリックまたはEnterで日本語に戻る</div>
+                </div>
+            </div>
+        `).join('');
+
+        return `
+            <div class="mt-4 text-start">
+                <h5 class="mb-2">語彙カード（早く終わった方向け）</h5>
+                <p class="text-muted small mb-3">テストで出題された語彙を復習できます。カードをクリックすると日本語と英語が切り替わります。</p>
+                <div class="flashcard-grid">
+                    ${cards}
+                </div>
+            </div>
+        `;
+    }
+
+    bindFlashcardEvents() {
+        const cards = document.querySelectorAll('.flashcard');
+        cards.forEach(card => {
+            const toggle = () => {
+                const currentSide = card.getAttribute('data-side');
+                const nextSide = currentSide === 'back' ? 'front' : 'back';
+                card.setAttribute('data-side', nextSide);
+                card.setAttribute('aria-pressed', nextSide === 'back' ? 'true' : 'false');
+            };
+
+            card.addEventListener('click', () => {
+                toggle();
+            });
+
+            card.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    toggle();
+                }
+            });
+        });
+    }
+
+    startVocabTimer(seconds = 10) {
+        this.clearVocabTimer();
+        const timerContainer = document.getElementById('vocabTimer');
+        const timerValueEl = document.getElementById('vocabTimerValue');
+        if (!timerContainer || !timerValueEl) {
+            return;
+        }
+
+        this.vocabTimerDeadline = Date.now() + seconds * 1000;
+
+        const updateTimer = () => {
+            if (!this.isQuestionActive) {
+                this.clearVocabTimer();
+                return;
+            }
+            const remainingMs = this.vocabTimerDeadline - Date.now();
+            const clamped = Math.max(0, remainingMs);
+            const secondsLeft = clamped / 1000;
+            timerValueEl.textContent = secondsLeft.toFixed(1);
+
+            timerContainer.classList.toggle('timer-warning', secondsLeft <= 5 && secondsLeft > 2);
+            timerContainer.classList.toggle('timer-danger', secondsLeft <= 2);
+            timerContainer.classList.toggle('timer-expired', secondsLeft <= 0);
+
+            if (remainingMs <= 0) {
+                this.handleVocabTimeout();
+            }
+        };
+
+        updateTimer();
+        this.vocabTimerIntervalId = window.setInterval(updateTimer, 100);
+        this.vocabTimerTimeoutId = window.setTimeout(() => {
+            this.handleVocabTimeout();
+        }, seconds * 1000);
+    }
+
+    clearVocabTimer() {
+        if (this.vocabTimerIntervalId) {
+            clearInterval(this.vocabTimerIntervalId);
+            this.vocabTimerIntervalId = null;
+        }
+        if (this.vocabTimerTimeoutId) {
+            clearTimeout(this.vocabTimerTimeoutId);
+            this.vocabTimerTimeoutId = null;
+        }
+        const timerContainer = document.getElementById('vocabTimer');
+        if (timerContainer) {
+            timerContainer.classList.remove('timer-warning', 'timer-danger', 'timer-expired');
+        }
+    }
+
+    handleVocabTimeout() {
+        if (!this.isQuestionActive) {
+            return;
+        }
+        this.isQuestionActive = false;
+        this.clearVocabTimer();
+        this.disableOptionButtons();
+
+        const timerValueEl = document.getElementById('vocabTimerValue');
+        if (timerValueEl) {
+            timerValueEl.textContent = '0.0';
+        }
+
+        this.handleVocabResponse('', { timedOut: true });
+    }
+
+    disableOptionButtons() {
+        document.querySelectorAll('.option-btn').forEach(btn => {
+            btn.disabled = true;
+            btn.classList.add('disabled');
+        });
+    }
+
+    formatTestTimestampForFilename(date) {
+        const target = date instanceof Date ? date : new Date(date);
+        if (Number.isNaN(target.getTime())) {
+            return this.formatTestTimestampForFilename(new Date());
+        }
+        const pad = (num) => String(num).padStart(2, '0');
+        return `${target.getFullYear()}${pad(target.getMonth() + 1)}${pad(target.getDate())}_${pad(target.getHours())}${pad(target.getMinutes())}`;
+    }
+
+    sanitizeForFilename(value, fallback = '未入力') {
+        const text = (value || '').toString().trim();
+        if (!text) {
+            return fallback;
+        }
+        const sanitized = text
+            .replace(/[\\/:*?"<>|]/g, '')
+            .replace(/\s+/g, '');
+        return sanitized || fallback;
+    }
+
+    getResultFilename(extension = 'xlsx') {
+        const sessionStart = this.dataCollector && this.dataCollector.currentSession
+            ? this.dataCollector.currentSession.startTime
+            : new Date();
+        const timestamp = this.formatTestTimestampForFilename(sessionStart);
+        const namePart = this.sanitizeForFilename(this.participantInfo.name, '氏名未入力');
+        const idPart = this.sanitizeForFilename(this.participantInfo.identifier, '学籍番号未入力');
+        const ext = (extension || 'xlsx').toString().replace(/^\.+/, '');
+        return `${timestamp}_${namePart}_${idPart}.${ext}`;
     }
 
     // Determine reading level from vocabulary size
@@ -703,6 +948,89 @@ class VocabReadingCATTest {
 .vocab-progress-bar {
     height: 0.85rem;
     border-radius: 999px;
+}
+
+.vocab-timer {
+    font-weight: 600;
+    font-size: 0.95rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 999px;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.vocab-timer.timer-warning {
+    background-color: #ffc107 !important;
+    color: #212529 !important;
+}
+
+.vocab-timer.timer-danger {
+    background-color: #dc3545 !important;
+    color: #fff !important;
+}
+
+.vocab-timer.timer-expired {
+    background-color: #6c757d !important;
+    color: #fff !important;
+}
+
+.flashcard-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1rem;
+}
+
+.flashcard {
+    border-radius: 16px;
+    border: 1px solid rgba(13, 110, 253, 0.12);
+    background: #fff;
+    box-shadow: 0 6px 18px rgba(13, 110, 253, 0.08);
+    padding: 1.25rem;
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    outline: none;
+}
+
+.flashcard:focus {
+    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+}
+
+.flashcard:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 30px rgba(13, 110, 253, 0.12);
+}
+
+.flashcard-correct {
+    border-left: 4px solid rgba(32, 201, 151, 0.6);
+}
+
+.flashcard-incorrect {
+    border-left: 4px solid rgba(220, 53, 69, 0.5);
+}
+
+.flashcard-face {
+    text-align: center;
+}
+
+.flashcard-label {
+    display: inline-block;
+    font-size: 0.85rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #6c757d;
+}
+
+.flashcard-word {
+    font-size: 1.35rem;
+    font-weight: 600;
+    margin: 0.75rem 0;
+}
+
+.flashcard[data-side="front"] .flashcard-back {
+    display: none;
+}
+
+.flashcard[data-side="back"] .flashcard-front {
+    display: none;
 }
 
 .reading-layout .reading-text-pane {
@@ -934,11 +1262,20 @@ class VocabReadingCATTest {
         }, 0);
     }
 
-    handleVocabResponse(selectedOption) {
+    handleVocabResponse(selectedOption, options = {}) {
+        const { timedOut = false } = options;
+        if (!timedOut && !this.isQuestionActive) {
+            return;
+        }
+        this.clearVocabTimer();
+        this.disableOptionButtons();
+        this.isQuestionActive = false;
         const startTime = this.lastQuestionStartTime || Date.now();
         const responseTime = Date.now() - startTime;
+        this.lastQuestionStartTime = null;
         const item = this.vocabularyItems[this.nextItem];
-        const correct = selectedOption === item.CorrectAnswer ? 1 : 0;
+        const recordedAnswer = timedOut ? '' : (selectedOption || '');
+        const correct = !timedOut && recordedAnswer === item.CorrectAnswer ? 1 : 0;
 
         // Store detailed response data
         this.responseDetails.push({
@@ -947,9 +1284,10 @@ class VocabReadingCATTest {
             level: item.Level,
             partOfSpeech: item.PartOfSpeech,
             correctAnswer: item.CorrectAnswer,
-            selectedAnswer: selectedOption,
+            selectedAnswer: recordedAnswer,
             correct: correct,
             responseTime: responseTime,
+            timedOut: timedOut,
             itemParameters: {
                 discrimination: item.Dscrimination,
                 difficulty: item.Difficulty,
@@ -972,6 +1310,7 @@ class VocabReadingCATTest {
         this.dataCollector.logInteraction('vocab_response', {
             item: item.Item,
             correct: correct,
+            timedOut: timedOut,
             responseTime: responseTime,
             newTheta: this.theta,
             newSE: this.se
@@ -1052,6 +1391,7 @@ class VocabReadingCATTest {
                 selectedAnswer: detail.selectedAnswer,
                 correct: detail.correct,
                 responseTime: detail.responseTime,
+                timedOut: detail.timedOut,
                 abilityBeforeResponse: detail.abilityBeforeResponse,
                 seBeforeResponse: detail.seBeforeResponse,
                 timestamp: detail.timestamp
@@ -1178,10 +1518,11 @@ class VocabReadingCATTest {
                 level: detail.level,
                 part_of_speech: detail.partOfSpeech,
                 correct_answer: detail.correctAnswer,
-                selected_answer: detail.selectedAnswer,
+                selected_answer: detail.timedOut ? '時間切れ' : detail.selectedAnswer,
                 response: detail.correct,
                 correct: detail.correct === 1 ? "正解" : "不正解",
                 response_time_ms: detail.responseTime,
+                timed_out: detail.timedOut ? 'はい' : 'いいえ',
                 discrimination: detail.itemParameters.discrimination,
                 difficulty: detail.itemParameters.difficulty,
                 guessing: detail.itemParameters.guessing,
@@ -1189,7 +1530,6 @@ class VocabReadingCATTest {
                 se_before: detail.seBeforeResponse,
                 item_order: i + 1
             }));
-
             // Reading responses with timing data (in milliseconds)
             const readingResponses = [
                 {
@@ -1233,6 +1573,10 @@ class VocabReadingCATTest {
                 (this.readingTimes.expository.question2End && this.readingTimes.expository.textStart ? 
                     (this.readingTimes.expository.question2End - this.readingTimes.expository.textStart) : 0);
 
+            const averageResponseTimeMs = vocabResponses.length
+                ? Math.round(vocabResponses.reduce((sum, r) => sum + r.response_time_ms, 0) / vocabResponses.length)
+                : 0;
+
             const summary = [{
                 test_date: new Date().toLocaleString('ja-JP'),
                 session_id: this.dataCollector.currentSession.sessionId,
@@ -1241,6 +1585,7 @@ class VocabReadingCATTest {
                 participant_english_qualifications: this.participantInfo.englishQualifications || '',
                 participant_study_abroad_experience_3m_plus: this.participantInfo.studyAbroadExperience || '',
                 participant_childhood_english_usage: this.participantInfo.childhoodEnglishUsage || '',
+                participant_in_class_implementation: this.participantInfo.inClassImplementation || '',
                 theta: Math.round(this.theta * 100) / 100,
                 standard_error: Math.round(this.se * 100) / 100,
                 vocabulary_size: Math.round(this.vocabFromTheta(this.theta)),
@@ -1248,7 +1593,7 @@ class VocabReadingCATTest {
                 total_vocab_items: this.administeredItems.length,
                 correct_vocab_answers: this.responses.filter(r => r === 1).length,
                 vocab_accuracy_percent: Math.round((this.responses.filter(r => r === 1).length / this.responses.length) * 100 * 10) / 10,
-                avg_vocab_response_time_ms: Math.round(vocabResponses.reduce((sum, r) => sum + r.response_time_ms, 0) / vocabResponses.length),
+                avg_vocab_response_time_ms: averageResponseTimeMs,
                 total_reading_time_ms: totalReadingTime,
                 total_test_duration_ms: Date.now() - this.dataCollector.currentSession.startTime.getTime()
             }];
@@ -1259,7 +1604,8 @@ class VocabReadingCATTest {
                 participant_identifier: this.participantInfo.identifier || '',
                 english_qualifications: this.participantInfo.englishQualifications || '',
                 study_abroad_experience_3m_plus: this.participantInfo.studyAbroadExperience || '',
-                childhood_english_usage: this.participantInfo.childhoodEnglishUsage || ''
+                childhood_english_usage: this.participantInfo.childhoodEnglishUsage || '',
+                in_class_implementation: this.participantInfo.inClassImplementation || ''
             }];
 
             const wb = XLSX.utils.book_new();
@@ -1273,8 +1619,7 @@ class VocabReadingCATTest {
             XLSX.utils.book_append_sheet(wb, wsVocab, "Vocabulary_Responses");
             XLSX.utils.book_append_sheet(wb, wsReading, "Reading_Responses");
 
-            const date = new Date().toISOString().split('T')[0];
-            XLSX.writeFile(wb, `vocab_reading_cat_result_${date}.xlsx`);
+            XLSX.writeFile(wb, this.getResultFilename('xlsx'));
             
             console.log('Excel file exported successfully');
             
@@ -1298,7 +1643,6 @@ class VocabReadingCATTest {
             const averageResponseTime = vocabResponses.length
                 ? Math.round(vocabResponses.reduce((sum, r) => sum + r.responseTime, 0) / vocabResponses.length)
                 : 0;
-
             const totalReadingTime =
                 (this.readingTimes.narrative.question2End && this.readingTimes.narrative.textStart ?
                     (this.readingTimes.narrative.question2End - this.readingTimes.narrative.textStart) : 0) +
@@ -1313,6 +1657,7 @@ class VocabReadingCATTest {
                 '英語資格・スコア': this.participantInfo.englishQualifications || '',
                 '3ヶ月以上の留学・海外滞在経験': this.participantInfo.studyAbroadExperience || '',
                 '幼少期の英語使用状況': this.participantInfo.childhoodEnglishUsage || '',
+                '授業内で実施したか': this.participantInfo.inClassImplementation || '',
                 '推定θ': Math.round(this.theta * 100) / 100,
                 '標準誤差': Math.round(this.se * 100) / 100,
                 '推定語彙サイズ': Math.round(this.vocabFromTheta(this.theta)),
@@ -1333,17 +1678,18 @@ class VocabReadingCATTest {
 
             if (vocabResponses.length) {
                 lines.push('');
-                lines.push('Vocabulary,番号,語,選択肢,正誤,レベル,品詞,回答時間ms');
+                lines.push('Vocabulary,番号,語,選択肢,正誤,レベル,品詞,回答時間ms,タイムアウト');
                 vocabResponses.forEach((detail, index) => {
                     lines.push([
                         'Vocabulary',
                         index + 1,
                         detail.item,
-                        detail.selectedAnswer,
+                        detail.timedOut ? '時間切れ' : detail.selectedAnswer,
                         detail.correct === 1 ? '正解' : '不正解',
                         detail.level,
                         detail.partOfSpeech,
-                        detail.responseTime
+                        detail.responseTime,
+                        detail.timedOut ? 'はい' : 'いいえ'
                     ].map(escape).join(','));
                 });
             }
@@ -1379,8 +1725,7 @@ class VocabReadingCATTest {
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            const date = new Date().toISOString().split('T')[0];
-            a.download = `vocab_reading_cat_summary_${date}.csv`;
+            a.download = this.getResultFilename('csv');
             a.click();
             URL.revokeObjectURL(url);
         } catch (error) {
@@ -1424,7 +1769,7 @@ class VocabReadingCATTest {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `cat_detailed_data_${this.dataCollector.currentSession.sessionId}.json`;
+        a.download = this.getResultFilename('json');
         a.click();
         URL.revokeObjectURL(url);
     }
@@ -1436,6 +1781,7 @@ class VocabReadingCATTest {
         const qualificationsPrefill = this.escapeHtml(this.participantInfo.englishQualifications || '');
         const studyAbroadPrefill = this.escapeHtml(this.participantInfo.studyAbroadExperience || '');
         const childhoodPrefill = this.escapeHtml(this.participantInfo.childhoodEnglishUsage || '');
+        const inClassPrefill = this.participantInfo.inClassImplementation || '';
         const participantLabel = this.formatParticipantLabel();
         const formatSurveyAnswer = (text) => {
             if (!text) {
@@ -1466,6 +1812,15 @@ class VocabReadingCATTest {
                                 <div class="card shadow-lg border-primary start-card">
                                     <div class="card-body p-4">
                                         ${participantLabel ? `<div class="alert alert-light border text-start mb-3"><strong>受験者:</strong> ${participantLabel}</div>` : ''}
+                                        <div class="mb-3">
+                                            <label for="inClassImplementation" class="form-label">このテストは授業内で実施しましたか？</label>
+                                            <select id="inClassImplementation" class="form-select form-select-lg">
+                                                <option value="" ${inClassPrefill === '' ? 'selected' : ''}>選択してください</option>
+                                                <option value="授業内で実施した" ${inClassPrefill === '授業内で実施した' ? 'selected' : ''}>授業内で実施した</option>
+                                                <option value="授業外で実施した" ${inClassPrefill === '授業外で実施した' ? 'selected' : ''}>授業外で実施した</option>
+                                            </select>
+                                            <small class="text-muted">授業内・授業外のどちらで受験したかを選択してください。</small>
+                                        </div>
                                         <div class="mb-3">
                                             <label for="englishQualifications" class="form-label">英語に関する資格・スコア</label>
                                             <textarea id="englishQualifications" class="form-control form-control-lg" rows="3" placeholder="例：英検準1級、TOEIC 850点、IELTS 6.5など">${qualificationsPrefill}</textarea>
@@ -1503,12 +1858,14 @@ class VocabReadingCATTest {
                         const qualificationsInput = document.getElementById('englishQualifications');
                         const studyAbroadInput = document.getElementById('studyAbroadExperience');
                         const childhoodInput = document.getElementById('childhoodEnglishUsage');
+                        const inClassSelect = document.getElementById('inClassImplementation');
 
                         this.participantInfo = {
                             ...this.participantInfo,
                             englishQualifications: qualificationsInput ? qualificationsInput.value : this.participantInfo.englishQualifications,
                             studyAbroadExperience: studyAbroadInput ? studyAbroadInput.value : this.participantInfo.studyAbroadExperience,
-                            childhoodEnglishUsage: childhoodInput ? childhoodInput.value : this.participantInfo.childhoodEnglishUsage
+                            childhoodEnglishUsage: childhoodInput ? childhoodInput.value : this.participantInfo.childhoodEnglishUsage,
+                            inClassImplementation: inClassSelect ? inClassSelect.value : this.participantInfo.inClassImplementation
                         };
 
                         this.preTestStep = 'participant';
@@ -1525,22 +1882,26 @@ class VocabReadingCATTest {
                         const qualificationsInput = document.getElementById('englishQualifications');
                         const studyAbroadInput = document.getElementById('studyAbroadExperience');
                         const childhoodInput = document.getElementById('childhoodEnglishUsage');
+                        const inClassSelect = document.getElementById('inClassImplementation');
 
                         const englishQualifications = qualificationsInput ? qualificationsInput.value.trim() : '';
                         const studyAbroadExperience = studyAbroadInput ? studyAbroadInput.value.trim() : '';
                         const childhoodEnglishUsage = childhoodInput ? childhoodInput.value.trim() : '';
+                        const inClassImplementation = inClassSelect ? inClassSelect.value.trim() : '';
 
                         this.participantInfo = {
                             ...this.participantInfo,
                             englishQualifications,
                             studyAbroadExperience,
-                            childhoodEnglishUsage
+                            childhoodEnglishUsage,
+                            inClassImplementation
                         };
 
                         this.dataCollector.logInteraction('participant_survey_submitted', {
                             englishQualifications,
                             studyAbroadExperience,
-                            childhoodEnglishUsage
+                            childhoodEnglishUsage,
+                            inClassImplementation
                         });
                         this.dataCollector.setParticipantInfo(this.participantInfo);
 
@@ -1686,12 +2047,17 @@ class VocabReadingCATTest {
                             </div>
 
                             <div class="card p-4 shadow-sm vocab-question-card">
-                                <div class="d-flex justify-content-between align-items-center mb-3">
-                                    <span class="badge bg-secondary">Level ${item.Level}</span>
-                                    <span class="badge bg-light text-dark">${item.PartOfSpeech}</span>
+                                <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+                                    <div class="d-flex flex-wrap align-items-center gap-2">
+                                        <span class="badge bg-secondary">Level ${item.Level}</span>
+                                        <span class="badge bg-light text-dark">${item.PartOfSpeech}</span>
+                                    </div>
+                                    <div id="vocabTimer" class="vocab-timer badge bg-warning text-dark" aria-live="polite">
+                                        残り <span id="vocabTimerValue">10.0</span> 秒
+                                    </div>
                                 </div>
                                 <h2 class="text-center mb-3">${item.Item}</h2>
-                                <p class="text-center text-muted mb-4">最も意味が近い英単語を選んでください</p>
+                                <p class="text-center text-muted mb-4">最も意味が近い英単語を選んでください（各問題10秒以内）</p>
                                 <div class="d-grid gap-3">
                                     ${options.map(option => 
                                         `<button class='btn btn-outline-primary option-btn' data-option='${option}'>${option}</button>`
@@ -1706,9 +2072,11 @@ class VocabReadingCATTest {
             // Add event listeners to option buttons
             document.querySelectorAll('.option-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => {
-                    this.handleVocabResponse(e.target.getAttribute('data-option'));
+                    this.handleVocabResponse(e.currentTarget.getAttribute('data-option') || '');
                 });
             });
+            this.isQuestionActive = true;
+            this.startVocabTimer(10);
 
         } else if (this.phase.startsWith('reading_')) {
             this.renderReadingPhase();
@@ -1720,10 +2088,18 @@ class VocabReadingCATTest {
             const englishQualificationsDisplay = formatSurveyAnswer(this.participantInfo.englishQualifications);
             const studyAbroadDisplay = formatSurveyAnswer(this.participantInfo.studyAbroadExperience);
             const childhoodDisplay = formatSurveyAnswer(this.participantInfo.childhoodEnglishUsage);
+            const inClassDisplay = formatSurveyAnswer(this.participantInfo.inClassImplementation);
+            const scoreReport = this.getScoreReportForSize(vocabSize);
+            const scoreReportFeedback = scoreReport ? `
+                <p class="mb-1">英検目安: ${this.escapeHtml(scoreReport.eiken)} / CEFR目安: ${this.escapeHtml(scoreReport.cefr)}</p>
+                <p class="mb-0 small text-muted">${this.escapeHtml(scoreReport.message)}</p>
+            ` : '';
+            const flashcardSection = this.renderFlashcardSection();
             const surveySection = `
                 <div class="mt-4 text-start">
                     <h5 class="mb-2">アンケート回答</h5>
                     <div class="bg-light rounded p-3">
+                        <p class="mb-2"><strong>授業内での実施状況</strong><br>${inClassDisplay}</p>
                         <p class="mb-2"><strong>英語資格・スコア</strong><br>${englishQualificationsDisplay}</p>
                         <p class="mb-2"><strong>3ヶ月以上の留学・海外滞在経験</strong><br>${studyAbroadDisplay}</p>
                         <p class="mb-0"><strong>幼少期の英語使用状況</strong><br>${childhoodDisplay}</p>
@@ -1741,8 +2117,10 @@ class VocabReadingCATTest {
                                 <h3 class="mb-3">推定語彙サイズ: ${vocabSize} 語</h3>
                                 <p>読解レベル: ${this.readingLevel}Kレベル</p>
                                 <p>語彙問題正答率: ${accuracy}%</p>
+                                ${scoreReportFeedback}
                             </div>
                             ${surveySection}
+                            ${flashcardSection}
                             <div class="mt-4 d-flex flex-wrap justify-content-center gap-3">
                                 <button id="downloadBtn" class="btn btn-success btn-lg">
                                     <i class="fas fa-file-excel me-2"></i>結果をExcelでダウンロード
@@ -1770,12 +2148,19 @@ class VocabReadingCATTest {
                 }
             });
             
+            this.bindFlashcardEvents();
+            
             // Log test completion
             this.dataCollector.logInteraction('test_completed', {
                 finalVocabSize: vocabSize,
                 accuracy: accuracy,
                 totalDuration: Date.now() - this.dataCollector.currentSession.startTime.getTime(),
-                participant: { ...this.participantInfo }
+                participant: { ...this.participantInfo },
+                scoreReport: scoreReport ? {
+                    label: scoreReport.label,
+                    eiken: scoreReport.eiken,
+                    cefr: scoreReport.cefr
+                } : null
             });
         }
     }
