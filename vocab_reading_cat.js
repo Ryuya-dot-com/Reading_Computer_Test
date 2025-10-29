@@ -331,6 +331,8 @@ class VocabReadingCATTest {
         this.inPractice = false;
         this.practiceIndex = 0;
         this.practiceFeedback = null;
+        this.practiceCompleted = false;
+        this.awaitingCatStart = false;
         this.injectStyles();
         this.loadData();
     }
@@ -476,6 +478,8 @@ class VocabReadingCATTest {
         this.inPractice = false;
         this.practiceIndex = 0;
         this.practiceFeedback = null;
+        this.practiceCompleted = false;
+        this.awaitingCatStart = false;
         
         // Reading Phase variables
         this.phase = 'cat'; // 'cat', 'reading_narrative', 'reading_expository', 'final'
@@ -800,6 +804,12 @@ class VocabReadingCATTest {
                     this.clearVocabTimer();
                     if (this.practiceIndex >= this.practiceItems.length) {
                         this.inPractice = false;
+                        this.practiceCompleted = true;
+                        this.awaitingCatStart = true;
+                        this.dataCollector.logInteraction('practice_completed', {
+                            timestamp: Date.now(),
+                            totalItems: this.practiceItems.length
+                        });
                     }
                     this.render();
                 });
@@ -2258,10 +2268,51 @@ class VocabReadingCATTest {
                 if (this.practiceIndex >= this.practiceItems.length) {
                     this.inPractice = false;
                     this.practiceFeedback = null;
+                    this.practiceCompleted = true;
+                    this.awaitingCatStart = true;
                 } else {
                     this.renderPracticeQuestion();
                     return;
                 }
+            }
+            if (this.practiceCompleted && this.awaitingCatStart) {
+                app.innerHTML = `
+                    <div class="container py-5 fade-in">
+                        <div class="row justify-content-center">
+                            <div class="col-xl-7 col-lg-8">
+                                <div class="card shadow-lg border-success">
+                                    <div class="card-body p-4 p-lg-5 text-center text-lg-start">
+                                        <h3 class="mb-3 text-success">
+                                            <i class="fas fa-check-circle me-2"></i>練習は完了しました
+                                        </h3>
+                                        <p class="text-muted">これより本番の語彙テストを開始します。各問題には <strong>10秒</strong> の回答制限があります。落ち着いて最も近い意味の語を選択してください。</p>
+                                        <ul class="cat-instruction-list mb-4">
+                                            <li>全ての問題に回答してください（無回答はありません）。</li>
+                                            <li>制限時間を過ぎると自動的に不正解となります。</li>
+                                            <li>途中で戻って修正することはできません。</li>
+                                        </ul>
+                                        <div class="d-grid gap-3 d-sm-flex justify-content-sm-between">
+                                            <button id="startMainTestBtn" class="btn btn-primary btn-lg flex-grow-1">
+                                                <i class="fas fa-play me-2"></i>本番を開始する
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                const startBtn = document.getElementById('startMainTestBtn');
+                if (startBtn) {
+                    startBtn.addEventListener('click', () => {
+                        this.awaitingCatStart = false;
+                        this.dataCollector.logInteraction('main_vocab_started', {
+                            timestamp: Date.now()
+                        });
+                        this.render();
+                    });
+                }
+                return;
             }
             // Vocabulary test question page
             const item = this.vocabularyItems[this.nextItem];
