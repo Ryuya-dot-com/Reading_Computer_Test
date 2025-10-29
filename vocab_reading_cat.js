@@ -326,6 +326,11 @@ class VocabReadingCATTest {
         this.vocabTimerDeadline = null;
         this.isQuestionActive = false;
         this.lastQuestionStartTime = null;
+        this.currentTimeoutHandler = null;
+        this.practiceItems = this.createPracticeItems();
+        this.inPractice = false;
+        this.practiceIndex = 0;
+        this.practiceFeedback = null;
         this.injectStyles();
         this.loadData();
     }
@@ -468,6 +473,9 @@ class VocabReadingCATTest {
         this.clearVocabTimer();
         this.isQuestionActive = false;
         this.lastQuestionStartTime = null;
+        this.inPractice = false;
+        this.practiceIndex = 0;
+        this.practiceFeedback = null;
         
         // Reading Phase variables
         this.phase = 'cat'; // 'cat', 'reading_narrative', 'reading_expository', 'final'
@@ -543,6 +551,32 @@ class VocabReadingCATTest {
         return name;
     }
 
+    createPracticeItems() {
+        return [
+            {
+                id: 'practice_dog',
+                prompt: '犬',
+                instruction: '日本語「犬」に最も近い英単語を選んでください。',
+                options: ['dog', 'book', 'car', 'tree'],
+                answer: 'dog'
+            },
+            {
+                id: 'practice_apple',
+                prompt: 'りんご',
+                instruction: '日本語「りんご」に最も近い英単語を選んでください。',
+                options: ['apple', 'desk', 'door', 'bus'],
+                answer: 'apple'
+            },
+            {
+                id: 'practice_cat',
+                prompt: '猫',
+                instruction: '日本語「猫」に最も近い英単語を選んでください。',
+                options: ['cat', 'train', 'phone', 'cup'],
+                answer: 'cat'
+            }
+        ];
+    }
+
     getScoreReportForSize(vocabSize) {
         if (!Array.isArray(this.scoreReportRubric) || !this.scoreReportRubric.length) {
             return null;
@@ -567,41 +601,109 @@ class VocabReadingCATTest {
                 japanese: detail.item,
                 english: detail.correctAnswer,
                 level: detail.level,
-                wasCorrect: detail.correct === 1
+                wasCorrect: detail.correct === 1,
+                source: 'test'
             });
         }
         return pairs;
     }
 
+    getLevelFlashcards(level, count, existingWords = new Set()) {
+        if (!Array.isArray(this.vocabularyItems) || !this.vocabularyItems.length) {
+            return [];
+        }
+
+        const clampLevels = (lvl) => Math.max(1, Math.min(10, lvl));
+        const levelOrder = [level, level - 1, level + 1, level - 2, level + 2, level - 3, level + 3];
+        const candidates = [];
+        const seenWords = new Set(existingWords);
+
+        for (const lvl of levelOrder) {
+            const target = clampLevels(lvl);
+            const subset = this.vocabularyItems.filter(item => item.Level === target);
+            for (const item of subset) {
+                if (!item || !item.Item || !item.CorrectAnswer) continue;
+                if (seenWords.has(item.Item)) continue;
+                candidates.push({
+                    japanese: item.Item,
+                    english: item.CorrectAnswer,
+                    level: item.Level,
+                    wasCorrect: null,
+                    source: 'extra'
+                });
+                seenWords.add(item.Item);
+            }
+            if (candidates.length >= count) break;
+        }
+
+        for (let i = candidates.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+        }
+
+        return candidates.slice(0, count);
+    }
+
     renderFlashcardSection() {
-        const pairs = this.getFlashcardPairs();
-        if (!pairs.length) {
+        const testPairs = this.getFlashcardPairs();
+        const existingWords = new Set(testPairs.map(pair => pair.japanese));
+        const levelForExtras = this.readingLevel || 0;
+        const extraPairs = levelForExtras ? this.getLevelFlashcards(levelForExtras, 100, existingWords) : [];
+
+        if (!testPairs.length && !extraPairs.length) {
             return '';
         }
 
-        const cards = pairs.map(pair => `
-            <div class="flashcard ${pair.wasCorrect ? 'flashcard-correct' : 'flashcard-incorrect'}" data-side="front" role="button" tabindex="0" aria-pressed="false" aria-label="日本語「${this.escapeHtml(pair.japanese)}」のカード">
-                <div class="flashcard-face flashcard-front">
-                    <span class="flashcard-label">日本語</span>
-                    <div class="flashcard-word">${this.escapeHtml(pair.japanese)}</div>
-                    <span class="badge bg-secondary-subtle text-secondary-emphasis">Level ${this.escapeHtml(String(pair.level))}</span>
-                    <div class="flashcard-hint text-muted small mt-2">クリックまたはEnterで英語を表示</div>
+        const renderCards = (pairs, extra = false) => pairs.map(pair => {
+            const statusClass = pair.source === 'test'
+                ? (pair.wasCorrect ? 'flashcard-correct' : 'flashcard-incorrect')
+                : 'flashcard-extra';
+            return `
+                <div class="flashcard ${statusClass}" data-side="front" role="button" tabindex="0" aria-pressed="false" aria-label="日本語「${this.escapeHtml(pair.japanese)}」のカード">
+                    <div class="flashcard-face flashcard-front">
+                        <span class="flashcard-label">日本語</span>
+                        <div class="flashcard-word">${this.escapeHtml(pair.japanese)}</div>
+                        <span class="badge ${pair.source === 'test' ? 'bg-secondary-subtle text-secondary-emphasis' : 'bg-light text-dark'}">Level ${this.escapeHtml(String(pair.level))}</span>
+                        <div class="flashcard-hint text-muted small mt-2">クリックまたはEnterで英語を表示</div>
+                    </div>
+                    <div class="flashcard-face flashcard-back">
+                        <span class="flashcard-label">English</span>
+                        <div class="flashcard-word">${this.escapeHtml(pair.english)}</div>
+                        <div class="flashcard-hint text-muted small mt-2">クリックまたはEnterで日本語に戻る</div>
+                    </div>
                 </div>
-                <div class="flashcard-face flashcard-back">
-                    <span class="flashcard-label">English</span>
-                    <div class="flashcard-word">${this.escapeHtml(pair.english)}</div>
-                    <div class="flashcard-hint text-muted small mt-2">クリックまたはEnterで日本語に戻る</div>
-                </div>
-            </div>
-        `).join('');
+            `;
+        }).join('');
+
+        const sections = [];
+        if (testPairs.length) {
+            sections.push(`
+                <section class="mb-4">
+                    <h6 class="fw-semibold mb-2">テストで出題された語彙</h6>
+                    <p class="text-muted small mb-3">結果に基づく語彙カードです。色の違いで解答の正誤を確認できます。</p>
+                    <div class="flashcard-grid">
+                        ${renderCards(testPairs)}
+                    </div>
+                </section>
+            `);
+        }
+
+        if (extraPairs.length) {
+            sections.push(`
+                <section>
+                    <h6 class="fw-semibold mb-2">レベル${this.escapeHtml(String(levelForExtras))}の追加語彙（ランダム100語）</h6>
+                    <p class="text-muted small mb-3">余った時間で復習できるように、同レベル付近の語彙から自動抽出しています。</p>
+                    <div class="flashcard-grid">
+                        ${renderCards(extraPairs, true)}
+                    </div>
+                </section>
+            `);
+        }
 
         return `
             <div class="mt-4 text-start">
                 <h5 class="mb-2">語彙カード（早く終わった方向け）</h5>
-                <p class="text-muted small mb-3">テストで出題された語彙を復習できます。カードをクリックすると日本語と英語が切り替わります。</p>
-                <div class="flashcard-grid">
-                    ${cards}
-                </div>
+                ${sections.join('')}
             </div>
         `;
     }
@@ -629,7 +731,83 @@ class VocabReadingCATTest {
         });
     }
 
-    startVocabTimer(seconds = 10) {
+    renderPracticeQuestion() {
+        const app = document.getElementById('app');
+        const item = this.practiceItems[this.practiceIndex];
+        const feedback = this.practiceFeedback;
+        const participantLabel = this.formatParticipantLabel();
+        const optionsHtml = item.options.map(option => `
+            <button class='btn btn-outline-primary option-btn' data-option='${option}' ${feedback ? 'disabled' : ''}>${option}</button>
+        `).join('');
+
+        const feedbackHtml = feedback ? `
+            <div class="alert ${feedback.correct ? 'alert-success' : 'alert-warning'} mt-3 mb-0" role="status">
+                ${feedback.timedOut ? '時間切れです。' : feedback.correct ? '正解です！' : '残念、不正解です。'}
+                正解は <strong>${this.escapeHtml(feedback.answer)}</strong> です。
+            </div>
+            <button id="practiceNextBtn" class="btn btn-primary btn-lg mt-3 w-100 w-md-auto">
+                次の練習問題へ
+            </button>
+        ` : `
+            <p class="text-muted mb-0 small">※練習問題でも各語彙問題には10秒の制限があります。</p>
+        `;
+
+        app.innerHTML = `
+            <div class="container py-4 fade-in">
+                <div class="row justify-content-center">
+                    <div class="col-xl-8 col-lg-9">
+                        ${participantLabel ? `<div class="text-muted small mb-2">受験者: ${participantLabel}</div>` : ''}
+                        <div class="card p-4 shadow-sm vocab-question-card border-info">
+                            <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3 gap-2">
+                                <div>
+                                    <span class="badge bg-info me-2">練習問題 ${this.practiceIndex + 1} / ${this.practiceItems.length}</span>
+                                    <span class="badge bg-light text-dark">解答時間: 10秒</span>
+                                </div>
+                                <div id="vocabTimer" class="vocab-timer badge bg-warning text-dark" aria-live="polite">
+                                    残り <span id="vocabTimerValue">${feedback ? '0.0' : '10.0'}</span> 秒
+                                </div>
+                            </div>
+                            <h4 class="mb-2">例題</h4>
+                            <p class="text-muted mb-3">${this.escapeHtml(item.instruction)}</p>
+                            <div class="practice-prompt text-center mb-3">
+                                <span class="display-5">${this.escapeHtml(item.prompt)}</span>
+                            </div>
+                            <div class="d-grid gap-3">
+                                ${optionsHtml}
+                            </div>
+                            ${feedbackHtml}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        if (!feedback) {
+            document.querySelectorAll('.option-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    this.handlePracticeResponse(e.currentTarget.getAttribute('data-option') || '');
+                });
+            });
+            this.isQuestionActive = true;
+            this.startVocabTimer(10, () => this.handlePracticeTimeout());
+        } else {
+            const nextBtn = document.getElementById('practiceNextBtn');
+            if (nextBtn) {
+                nextBtn.addEventListener('click', () => {
+                    this.practiceIndex += 1;
+                    this.practiceFeedback = null;
+                    this.isQuestionActive = false;
+                    this.clearVocabTimer();
+                    if (this.practiceIndex >= this.practiceItems.length) {
+                        this.inPractice = false;
+                    }
+                    this.render();
+                });
+            }
+        }
+    }
+
+    startVocabTimer(seconds = 10, onTimeout) {
         this.clearVocabTimer();
         const timerContainer = document.getElementById('vocabTimer');
         const timerValueEl = document.getElementById('vocabTimerValue');
@@ -638,6 +816,9 @@ class VocabReadingCATTest {
         }
 
         this.vocabTimerDeadline = Date.now() + seconds * 1000;
+        this.currentTimeoutHandler = typeof onTimeout === 'function'
+            ? onTimeout
+            : () => this.handleVocabTimeout();
 
         const updateTimer = () => {
             if (!this.isQuestionActive) {
@@ -654,14 +835,22 @@ class VocabReadingCATTest {
             timerContainer.classList.toggle('timer-expired', secondsLeft <= 0);
 
             if (remainingMs <= 0) {
-                this.handleVocabTimeout();
+                const handler = this.currentTimeoutHandler;
+                this.currentTimeoutHandler = null;
+                if (typeof handler === 'function') {
+                    handler();
+                }
             }
         };
 
         updateTimer();
         this.vocabTimerIntervalId = window.setInterval(updateTimer, 100);
         this.vocabTimerTimeoutId = window.setTimeout(() => {
-            this.handleVocabTimeout();
+            const handler = this.currentTimeoutHandler;
+            this.currentTimeoutHandler = null;
+            if (typeof handler === 'function') {
+                handler();
+            }
         }, seconds * 1000);
     }
 
@@ -674,6 +863,7 @@ class VocabReadingCATTest {
             clearTimeout(this.vocabTimerTimeoutId);
             this.vocabTimerTimeoutId = null;
         }
+        this.currentTimeoutHandler = null;
         const timerContainer = document.getElementById('vocabTimer');
         if (timerContainer) {
             timerContainer.classList.remove('timer-warning', 'timer-danger', 'timer-expired');
@@ -701,6 +891,36 @@ class VocabReadingCATTest {
             btn.disabled = true;
             btn.classList.add('disabled');
         });
+    }
+
+    handlePracticeResponse(selectedOption, options = {}) {
+        const { timedOut = false } = options;
+        if (!timedOut && !this.isQuestionActive) {
+            return;
+        }
+        this.clearVocabTimer();
+        this.disableOptionButtons();
+        this.isQuestionActive = false;
+
+        const item = this.practiceItems[this.practiceIndex];
+        const recorded = timedOut ? '' : (selectedOption || '');
+        const correct = !timedOut && recorded === item.answer;
+
+        this.practiceFeedback = {
+            correct,
+            timedOut,
+            recorded,
+            answer: item.answer
+        };
+
+        this.render();
+    }
+
+    handlePracticeTimeout() {
+        if (!this.inPractice || this.practiceFeedback) {
+            return;
+        }
+        this.handlePracticeResponse('', { timedOut: true });
     }
 
     formatTestTimestampForFilename(date) {
@@ -1007,6 +1227,10 @@ class VocabReadingCATTest {
     border-left: 4px solid rgba(220, 53, 69, 0.5);
 }
 
+.flashcard-extra {
+    border-left: 4px solid rgba(13, 110, 253, 0.35);
+}
+
 .flashcard-face {
     text-align: center;
 }
@@ -1031,6 +1255,11 @@ class VocabReadingCATTest {
 
 .flashcard[data-side="back"] .flashcard-front {
     display: none;
+}
+
+.practice-prompt .display-5 {
+    font-weight: 600;
+    letter-spacing: 0.05em;
 }
 
 .reading-layout .reading-text-pane {
@@ -1905,6 +2134,12 @@ class VocabReadingCATTest {
                         });
                         this.dataCollector.setParticipantInfo(this.participantInfo);
 
+                        this.inPractice = true;
+                        this.practiceIndex = 0;
+                        this.practiceFeedback = null;
+                        this.isQuestionActive = false;
+                        this.clearVocabTimer();
+
                         this.started = true;
                         this.preTestStep = null;
                         this.dataCollector.logInteraction('test_started', {
@@ -1935,6 +2170,7 @@ class VocabReadingCATTest {
                                     <h5><i class="fas fa-bolt me-2 text-primary"></i>テスト概要</h5>
                                     <ul class="cat-instruction-list">
                                         <li>語彙4択問題を順番に回答（約30問）</li>
+                                        <li>各語彙問題には10秒の時間制限があります</li>
                                         <li>回答に応じて難易度が自動調整</li>
                                         <li>続けてレベル別読解問題を2題実施</li>
                                     </ul>
@@ -1968,6 +2204,7 @@ class VocabReadingCATTest {
                                     <div class="card-body p-4">
                                         <h4 class="mb-3">受験者情報を入力してください</h4>
                                         <p class="text-muted mb-3">続くステップで英語経験アンケートにご回答いただきます。</p>
+                                        <p class="text-muted small mb-4">本番の前に、10秒タイマー付きの練習問題（3問）で操作と制限時間を確認できます。</p>
                                         <div class="row g-3 mb-3 text-start">
                                             <div class="col-md-7">
                                                 <label for="participantName" class="form-label">氏名 <span class="text-danger">*</span></label>
@@ -2017,6 +2254,15 @@ class VocabReadingCATTest {
             }
 
         } else if (this.phase === 'cat' && !this.catDone) {
+            if (this.inPractice) {
+                if (this.practiceIndex >= this.practiceItems.length) {
+                    this.inPractice = false;
+                    this.practiceFeedback = null;
+                } else {
+                    this.renderPracticeQuestion();
+                    return;
+                }
+            }
             // Vocabulary test question page
             const item = this.vocabularyItems[this.nextItem];
             const options = [item.CorrectAnswer, item.Distractor_1, item.Distractor_2, item.Distractor_3]
@@ -2119,12 +2365,14 @@ class VocabReadingCATTest {
                                 <p>語彙問題正答率: ${accuracy}%</p>
                                 ${scoreReportFeedback}
                             </div>
+                            <div class="mt-3">
+                                <button id="downloadBtn" class="btn btn-success btn-lg w-100 w-md-auto">
+                                    <i class="fas fa-file-excel me-2"></i>結果をExcelでダウンロード
+                                </button>
+                            </div>
                             ${surveySection}
                             ${flashcardSection}
                             <div class="mt-4 d-flex flex-wrap justify-content-center gap-3">
-                                <button id="downloadBtn" class="btn btn-success btn-lg">
-                                    <i class="fas fa-file-excel me-2"></i>結果をExcelでダウンロード
-                                </button>
                                 <button id="restartBtn" class="btn btn-outline-secondary btn-lg">
                                     <i class="fas fa-redo me-2"></i>再テスト
                                 </button>
