@@ -1856,17 +1856,21 @@ class VocabReadingCATTest {
 
             const updateScrollProgress = () => {
                 if (!textPane || !continueBtn) return;
-                const scrollableDistance = textPane.scrollHeight - textPane.clientHeight;
-                let progressRatio = 1;
-                if (scrollableDistance > 0) {
-                    progressRatio = Math.min(1, Math.max(0, textPane.scrollTop / scrollableDistance));
+                const scrollableDistance = Math.max(0, textPane.scrollHeight - textPane.clientHeight);
+                const nearBottom = scrollableDistance === 0 ||
+                    textPane.scrollTop >= scrollableDistance - 2 ||
+                    Math.ceil(textPane.scrollTop + textPane.clientHeight) >= textPane.scrollHeight - 1;
+                let progressRatio = scrollableDistance === 0 ? 1 :
+                    Math.min(1, Math.max(0, textPane.scrollTop / scrollableDistance));
+                if (nearBottom) {
+                    progressRatio = 1;
                 }
 
                 if (progressBar) {
                     progressBar.style.width = `${Math.round(progressRatio * 100)}%`;
                 }
 
-                if (progressRatio >= 0.98) {
+                if (nearBottom) {
                     if (!scrollCompleted) {
                         scrollCompleted = true;
                         this.dataCollector.logInteraction('reading_scroll_completed', {
