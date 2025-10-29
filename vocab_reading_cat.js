@@ -2226,7 +2226,7 @@ class VocabReadingCATTest {
                             <div class="col-xl-7 col-lg-8">
                                 <div class="card shadow-sm border-0">
                                     <div class="card-body p-5 text-center">
-                                        <h1 class="mb-3">JACET 語彙・読解テスト</h1>
+                                        <h1 class="mb-3">語彙・読解テスト</h1>
                                         <p class="text-muted mb-0">Computer Adaptive Test (CAT) で語彙力と読解力を効率的に測定します。</p>
                                     </div>
                                 </div>
