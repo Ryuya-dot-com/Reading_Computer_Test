@@ -333,6 +333,9 @@ class VocabReadingCATTest {
         this.practiceFeedback = null;
         this.practiceCompleted = false;
         this.awaitingCatStart = false;
+        this.prepCountdownDuration = 5;
+        this.prepCountdownRemaining = null;
+        this.prepCountdownTimerId = null;
         this.injectStyles();
         this.loadData();
     }
@@ -480,6 +483,8 @@ class VocabReadingCATTest {
         this.practiceFeedback = null;
         this.practiceCompleted = false;
         this.awaitingCatStart = false;
+        this.clearPrepCountdown();
+        this.prepCountdownRemaining = null;
         
         // Reading Phase variables
         this.phase = 'cat'; // 'cat', 'reading_narrative', 'reading_expository', 'final'
@@ -880,6 +885,50 @@ class VocabReadingCATTest {
         }
     }
 
+    clearPrepCountdown() {
+        if (this.prepCountdownTimerId) {
+            clearInterval(this.prepCountdownTimerId);
+            this.prepCountdownTimerId = null;
+        }
+    }
+
+    updatePrepCountdownDisplay() {
+        const el = document.getElementById('catCountdownValue');
+        if (el && this.prepCountdownRemaining !== null) {
+            el.textContent = String(this.prepCountdownRemaining);
+        }
+    }
+
+    startPrepCountdown() {
+        this.clearPrepCountdown();
+        this.prepCountdownRemaining = this.prepCountdownDuration;
+        this.updatePrepCountdownDisplay();
+        this.prepCountdownTimerId = setInterval(() => {
+            if (this.prepCountdownRemaining === null) {
+                return;
+            }
+            this.prepCountdownRemaining = Math.max(0, this.prepCountdownRemaining - 1);
+            this.updatePrepCountdownDisplay();
+            if (this.prepCountdownRemaining <= 0) {
+                this.proceedToMainCAT(true);
+            }
+        }, 1000);
+    }
+
+    proceedToMainCAT(autoStart = false) {
+        if (!this.awaitingCatStart) {
+            return;
+        }
+        this.awaitingCatStart = false;
+        this.clearPrepCountdown();
+        this.prepCountdownRemaining = null;
+        this.dataCollector.logInteraction('main_vocab_started', {
+            timestamp: Date.now(),
+            triggeredBy: autoStart ? 'countdown' : 'button'
+        });
+        this.render();
+    }
+
     handleVocabTimeout() {
         if (!this.isQuestionActive) {
             return;
@@ -1270,6 +1319,12 @@ class VocabReadingCATTest {
 .practice-prompt .display-5 {
     font-weight: 600;
     letter-spacing: 0.05em;
+}
+
+.countdown-display {
+    font-size: clamp(2.75rem, 5vw, 3.75rem);
+    font-weight: 700;
+    letter-spacing: 0.06em;
 }
 
 .reading-layout .reading-text-pane {
@@ -2149,6 +2204,10 @@ class VocabReadingCATTest {
                         this.practiceFeedback = null;
                         this.isQuestionActive = false;
                         this.clearVocabTimer();
+                        this.clearPrepCountdown();
+                        this.prepCountdownRemaining = null;
+                        this.practiceCompleted = false;
+                        this.awaitingCatStart = false;
 
                         this.started = true;
                         this.preTestStep = null;
@@ -2276,6 +2335,7 @@ class VocabReadingCATTest {
                 }
             }
             if (this.practiceCompleted && this.awaitingCatStart) {
+                const countdownDisplay = this.prepCountdownRemaining !== null ? this.prepCountdownRemaining : this.prepCountdownDuration;
                 app.innerHTML = `
                     <div class="container py-5 fade-in">
                         <div class="row justify-content-center">
@@ -2291,9 +2351,13 @@ class VocabReadingCATTest {
                                             <li>制限時間を過ぎると自動的に不正解となります。</li>
                                             <li>途中で戻って修正することはできません。</li>
                                         </ul>
-                                        <div class="d-grid gap-3 d-sm-flex justify-content-sm-between">
-                                            <button id="startMainTestBtn" class="btn btn-primary btn-lg flex-grow-1">
-                                                <i class="fas fa-play me-2"></i>本番を開始する
+                                        <div class="text-center mb-4">
+                                            <div class="countdown-display text-primary" id="catCountdownValue">${countdownDisplay}</div>
+                                            <p class="text-muted mb-0">本番は <span class="fw-semibold">${countdownDisplay} 秒後</span> に自動開始されます。</p>
+                                        </div>
+                                        <div class="d-grid gap-3 justify-content-center">
+                                            <button id="startMainTestBtn" class="btn btn-primary btn-lg px-5 py-3">
+                                                <i class="fas fa-play me-2"></i>今すぐ本番を開始
                                             </button>
                                         </div>
                                     </div>
@@ -2305,12 +2369,13 @@ class VocabReadingCATTest {
                 const startBtn = document.getElementById('startMainTestBtn');
                 if (startBtn) {
                     startBtn.addEventListener('click', () => {
-                        this.awaitingCatStart = false;
-                        this.dataCollector.logInteraction('main_vocab_started', {
-                            timestamp: Date.now()
-                        });
-                        this.render();
+                        this.proceedToMainCAT(false);
                     });
+                }
+                if (this.prepCountdownTimerId === null) {
+                    this.startPrepCountdown();
+                } else {
+                    this.updatePrepCountdownDisplay();
                 }
                 return;
             }
